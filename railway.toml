@@ -1,0 +1,41 @@
+# Railway.app Configuration for Jay's Frames CMS
+
+# This file configures how Railway deploys your application
+
+$schema: https://railway.app/railway.schema.json
+
+services:
+  # Backend API Server
+  - name: cms-api
+    source: /server
+    build:
+      buildCommand: npm install && npm run build
+      startCommand: npm start
+    env:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: ${{Postgres.DATABASE_URL}}
+    healthcheck:
+      path: /health
+      interval: 30
+      timeout: 10
+      
+  # PostgreSQL Database
+  - name: postgres
+    image: postgres:16
+    env:
+      POSTGRES_DB: jays_frames_cms
+      POSTGRES_USER: ${{POSTGRES_USER}}
+      POSTGRES_PASSWORD: ${{POSTGRES_PASSWORD}}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      
+  # Frontend Client
+  - name: cms-client
+    source: /client
+    build:
+      buildCommand: npm install && npm run build
+      startCommand: npm run preview -- --port 3000
+    env:
+      NODE_ENV: production
+      VITE_API_URL: https://${{cms-api.RAILWAY_PUBLIC_DOMAIN}}
