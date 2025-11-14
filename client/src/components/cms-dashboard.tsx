@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Upload, Edit, Save, Download, AlertCircle, CheckCircle, TrendingUp, FileText } from 'lucide-react';
+import { Upload, Edit, Save, Download, AlertCircle, CheckCircle, TrendingUp, FileText, AlertTriangle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/index';
@@ -23,18 +23,73 @@ interface Page {
   updated_at: string;
 }
 
-interface SEOAnalysis {
+interface KeywordStuffingAlert {
+  keyword: string;
+  density: number;
+  severity: 'low' | 'medium' | 'high';
+  penaltyRisk: 'Low' | 'Medium' | 'High';
+  currentCount: number;
+  recommendedCount: number;
+}
+
+interface SEOScoreBreakdown {
+  category: string;
+  score: number;
+  maxScore: number;
+  status: 'green' | 'yellow' | 'red';
+  issues: string[];
+}
+
+interface EnhancedSEOAnalysis {
+  // Original metrics
   wordCount: number;
   keywordDensity: { [keyword: string]: number };
   readabilityScore: number;
   suggestions: string[];
+
+  // New enhanced metrics
+  overallScore: number; // 0-100
+  scoreBreakdown: SEOScoreBreakdown[];
+  keywordStuffingAlerts: KeywordStuffingAlert[];
+
+  // Title metrics
+  titleLength: number;
+  titleStatus: 'green' | 'yellow' | 'red';
+  titleHasKeyword: boolean;
+
+  // First paragraph metrics
+  firstParagraphWordCount: number;
+  firstParagraphStatus: 'green' | 'yellow' | 'red';
+  keywordInFirstSentence: boolean;
+
+  // Content quality
+  hasH1: boolean;
+  h1Count: number;
+  hasMetaDescription: boolean;
+}
+
+// Debounce hook
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
 }
 
 export default function CMSDashboard() {
   const [pages, setPages] = useState<Page[]>([]);
   const [selectedPages, setSelectedPages] = useState<number[]>([]);
   const [currentPage, setCurrentPage] = useState<Page | null>(null);
-  const [seoAnalysis, setSeoAnalysis] = useState<SEOAnalysis | null>(null);
+  const [seoAnalysis, setSeoAnalysis] = useState<EnhancedSEOAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -44,6 +99,10 @@ export default function CMSDashboard() {
   const [replaceText, setReplaceText] = useState('');
   const [targetFields, setTargetFields] = useState<string[]>(['content', 'seo_meta']);
   const [bulkEditResults, setBulkEditResults] = useState<any>(null);
+
+  // Live editing state
+  const [liveAnalysisEnabled, setLiveAnalysisEnabled] = useState(true);
+  const debouncedCurrentPage = useDebounce(currentPage, 1000);
 
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
@@ -66,6 +125,13 @@ export default function CMSDashboard() {
   useEffect(() => {
     fetchPages();
   }, [searchTerm]);
+
+  // Live SEO analysis on content change
+  useEffect(() => {
+    if (liveAnalysisEnabled && debouncedCurrentPage) {
+      analyzeSEOLive(debouncedCurrentPage);
+    }
+  }, [debouncedCurrentPage, liveAnalysisEnabled]);
 
   // Handle file upload and extraction
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -181,6 +247,28 @@ export default function CMSDashboard() {
     }
   };
 
+  // Live SEO analysis
+  const analyzeSEOLive = async (page: Page) => {
+    try {
+      const response = await fetch(`${API_URL}/api/seo/analyze/live`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: page.content,
+          seoMeta: page.seo_meta,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setSeoAnalysis(data.analysis);
+      }
+    } catch (error) {
+      console.error('Error in live SEO analysis:', error);
+    }
+  };
+
   // Update page content
   const updatePageContent = async (page: Page) => {
     try {
@@ -211,6 +299,38 @@ export default function CMSDashboard() {
     }
   };
 
+  // Download all pages as ZIP
+  const downloadAllPages = async () => {
+    try {
+      setLoading(true);
+
+      const response = await fetch(`${API_URL}/api/pages/export/zip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pageIds: pages.map(p => p.id) }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Download failed');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'jays-frames-pages.zip';
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Error downloading pages:', error);
+      alert('Error downloading files. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Toggle page selection
   const togglePageSelection = (pageId: number) => {
     setSelectedPages(prev =>
@@ -227,6 +347,25 @@ export default function CMSDashboard() {
     } else {
       setSelectedPages(pages.map(p => p.id));
     }
+  };
+
+  // Get color indicator for status
+  const getStatusColor = (status: 'green' | 'yellow' | 'red') => {
+    if (status === 'green') return 'text-green-600';
+    if (status === 'yellow') return 'text-yellow-600';
+    return 'text-red-600';
+  };
+
+  const getStatusBg = (status: 'green' | 'yellow' | 'red') => {
+    if (status === 'green') return 'bg-green-100';
+    if (status === 'yellow') return 'bg-yellow-100';
+    return 'bg-red-100';
+  };
+
+  const getScoreColor = (score: number) => {
+    if (score >= 67) return 'text-green-600';
+    if (score >= 34) return 'text-yellow-600';
+    return 'text-red-600';
   };
 
   return (
@@ -441,7 +580,17 @@ export default function CMSDashboard() {
           <TabsContent value="individual" className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>Edit Individual Page</CardTitle>
+                <div className="flex items-center justify-between">
+                  <CardTitle>Edit Individual Page</CardTitle>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={liveAnalysisEnabled}
+                      onChange={(e) => setLiveAnalysisEnabled(e.target.checked)}
+                    />
+                    Live SEO Analysis
+                  </label>
+                </div>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
@@ -451,7 +600,7 @@ export default function CMSDashboard() {
                     onChange={(e) => {
                       const page = pages.find(p => p.id === parseInt(e.target.value));
                       setCurrentPage(page || null);
-                      if (page) analyzeSEO(page.page_slug);
+                      if (page && !liveAnalysisEnabled) analyzeSEO(page.page_slug);
                     }}
                   >
                     <option value="">Choose a page...</option>
@@ -464,74 +613,236 @@ export default function CMSDashboard() {
                 </div>
 
                 {currentPage && (
-                  <div className="space-y-4 pt-4 border-t">
-                    <div>
-                      <label className="block text-sm font-medium mb-2">SEO Title</label>
-                      <Input
-                        value={currentPage.seo_meta.title}
-                        onChange={(e) => setCurrentPage({
-                          ...currentPage,
-                          seo_meta: { ...currentPage.seo_meta, title: e.target.value }
-                        })}
-                      />
-                      <div className="text-xs text-gray-500 mt-1">
-                        {currentPage.seo_meta.title.length} characters
+                  <div className="grid md:grid-cols-2 gap-6">
+                    {/* Left Column - Editor */}
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium mb-2 flex items-center justify-between">
+                          <span>SEO Title</span>
+                          {seoAnalysis && (
+                            <span className={`text-xs px-2 py-1 rounded ${getStatusBg(seoAnalysis.titleStatus)}`}>
+                              {currentPage.seo_meta.title.length} chars
+                              {seoAnalysis.titleStatus === 'green' && ' ✓'}
+                              {seoAnalysis.titleStatus === 'yellow' && ' ⚠'}
+                              {seoAnalysis.titleStatus === 'red' && ' ✗'}
+                            </span>
+                          )}
+                        </label>
+                        <Input
+                          value={currentPage.seo_meta.title}
+                          onChange={(e) => setCurrentPage({
+                            ...currentPage,
+                            seo_meta: { ...currentPage.seo_meta, title: e.target.value }
+                          })}
+                        />
+                        <div className="text-xs text-gray-500 mt-1">
+                          Optimal: 50-60 characters {seoAnalysis?.titleHasKeyword ? '✓ Has keyword' : '✗ Missing keyword'}
+                        </div>
                       </div>
-                    </div>
 
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Meta Description</label>
-                      <Textarea
-                        value={currentPage.seo_meta.description}
-                        onChange={(e) => setCurrentPage({
-                          ...currentPage,
-                          seo_meta: { ...currentPage.seo_meta, description: e.target.value }
-                        })}
-                        rows={3}
-                      />
-                      <div className="text-xs text-gray-500 mt-1">
-                        {currentPage.seo_meta.description.length} characters (aim for 150-160)
+                      <div>
+                        <label className="block text-sm font-medium mb-2">Meta Description</label>
+                        <Textarea
+                          value={currentPage.seo_meta.description}
+                          onChange={(e) => setCurrentPage({
+                            ...currentPage,
+                            seo_meta: { ...currentPage.seo_meta, description: e.target.value }
+                          })}
+                          rows={3}
+                        />
+                        <div className="text-xs text-gray-500 mt-1">
+                          {currentPage.seo_meta.description.length} characters (aim for 150-160)
+                        </div>
                       </div>
+
+                      <div>
+                        <label className="block text-sm font-medium mb-2">Keywords</label>
+                        <Input
+                          value={currentPage.seo_meta.keywords}
+                          onChange={(e) => setCurrentPage({
+                            ...currentPage,
+                            seo_meta: { ...currentPage.seo_meta, keywords: e.target.value }
+                          })}
+                        />
+                      </div>
+
+                      <div className="pt-4">
+                        <label className="block text-sm font-medium mb-2 flex items-center justify-between">
+                          <span>Page Content (JSON)</span>
+                          {seoAnalysis && (
+                            <span className={`text-xs px-2 py-1 rounded ${getStatusBg(seoAnalysis.firstParagraphStatus)}`}>
+                              First ¶: {seoAnalysis.firstParagraphWordCount} words
+                              {seoAnalysis.firstParagraphStatus === 'green' && ' ✓'}
+                              {seoAnalysis.firstParagraphStatus === 'yellow' && ' ⚠'}
+                              {seoAnalysis.firstParagraphStatus === 'red' && ' ✗'}
+                            </span>
+                          )}
+                        </label>
+                        <Textarea
+                          value={JSON.stringify(currentPage.content, null, 2)}
+                          onChange={(e) => {
+                            try {
+                              setCurrentPage({
+                                ...currentPage,
+                                content: JSON.parse(e.target.value)
+                              });
+                            } catch (error) {
+                              // Invalid JSON, ignore
+                            }
+                          }}
+                          rows={12}
+                          className="font-mono text-sm"
+                        />
+                      </div>
+
+                      <Button
+                        onClick={() => updatePageContent(currentPage)}
+                        disabled={loading}
+                        className="w-full"
+                      >
+                        <Save className="w-4 h-4 mr-2" />
+                        Save Changes
+                      </Button>
                     </div>
 
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Keywords</label>
-                      <Input
-                        value={currentPage.seo_meta.keywords}
-                        onChange={(e) => setCurrentPage({
-                          ...currentPage,
-                          seo_meta: { ...currentPage.seo_meta, keywords: e.target.value }
-                        })}
-                      />
-                    </div>
+                    {/* Right Column - Live Feedback */}
+                    {seoAnalysis && (
+                      <div className="space-y-4">
+                        {/* Overall Score */}
+                        <Card className={`border-2 ${
+                          seoAnalysis.overallScore >= 67 ? 'border-green-500' :
+                          seoAnalysis.overallScore >= 34 ? 'border-yellow-500' : 'border-red-500'
+                        }`}>
+                          <CardHeader className="pb-3">
+                            <CardTitle className="text-lg">SEO Score</CardTitle>
+                          </CardHeader>
+                          <CardContent>
+                            <div className="text-center">
+                              <div className={`text-6xl font-bold ${getScoreColor(seoAnalysis.overallScore)}`}>
+                                {seoAnalysis.overallScore}
+                              </div>
+                              <div className="text-sm text-gray-600 mt-2">out of 100</div>
+                              <div className="mt-4 bg-gray-200 rounded-full h-4 overflow-hidden">
+                                <div
+                                  className={`h-full transition-all duration-500 ${
+                                    seoAnalysis.overallScore >= 67 ? 'bg-green-500' :
+                                    seoAnalysis.overallScore >= 34 ? 'bg-yellow-500' : 'bg-red-500'
+                                  }`}
+                                  style={{ width: `${seoAnalysis.overallScore}%` }}
+                                />
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
 
-                    <div className="pt-4">
-                      <label className="block text-sm font-medium mb-2">Page Content (JSON)</label>
-                      <Textarea
-                        value={JSON.stringify(currentPage.content, null, 2)}
-                        onChange={(e) => {
-                          try {
-                            setCurrentPage({
-                              ...currentPage,
-                              content: JSON.parse(e.target.value)
-                            });
-                          } catch (error) {
-                            // Invalid JSON, ignore
-                          }
-                        }}
-                        rows={10}
-                        className="font-mono text-sm"
-                      />
-                    </div>
+                        {/* Keyword Stuffing Alerts */}
+                        {seoAnalysis.keywordStuffingAlerts.length > 0 && (
+                          <Alert className="border-red-500 bg-red-50">
+                            <AlertTriangle className="h-5 w-5 text-red-600" />
+                            <AlertDescription>
+                              <div className="font-semibold text-red-900 mb-2">⚠️ Keyword Stuffing Detected!</div>
+                              {seoAnalysis.keywordStuffingAlerts.map((alert, idx) => (
+                                <div key={idx} className="mt-3 text-sm border-t pt-2">
+                                  <div className="font-medium text-red-800">"{alert.keyword}"</div>
+                                  <div className="mt-1 space-y-1">
+                                    <div>Density: <span className="font-bold">{alert.density}%</span> (Target: 1-3%)</div>
+                                    <div>Google Penalty Risk: <span className={`font-bold ${
+                                      alert.penaltyRisk === 'High' ? 'text-red-600' :
+                                      alert.penaltyRisk === 'Medium' ? 'text-yellow-600' : 'text-orange-600'
+                                    }`}>{alert.penaltyRisk}</span></div>
+                                    <div className="text-xs bg-white p-2 rounded mt-2">
+                                      <strong>Recommendation:</strong> Reduce from {alert.currentCount} to ~{alert.recommendedCount} occurrences
+                                      <br />
+                                      <span className="text-gray-600">Before: {alert.density}% → After: ~3%</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </AlertDescription>
+                          </Alert>
+                        )}
 
-                    <Button
-                      onClick={() => updatePageContent(currentPage)}
-                      disabled={loading}
-                      className="w-full"
-                    >
-                      <Save className="w-4 h-4 mr-2" />
-                      Save Changes
-                    </Button>
+                        {/* Score Breakdown */}
+                        <Card>
+                          <CardHeader className="pb-3">
+                            <CardTitle className="text-lg">Score Breakdown</CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-3">
+                            {seoAnalysis.scoreBreakdown.map((breakdown, idx) => (
+                              <div key={idx} className="space-y-1">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-sm font-medium">{breakdown.category}</span>
+                                  <span className={`font-bold ${getStatusColor(breakdown.status)}`}>
+                                    {breakdown.score}/{breakdown.maxScore}
+                                  </span>
+                                </div>
+                                <div className="bg-gray-200 rounded-full h-2 overflow-hidden">
+                                  <div
+                                    className={`h-full transition-all duration-300 ${
+                                      breakdown.status === 'green' ? 'bg-green-500' :
+                                      breakdown.status === 'yellow' ? 'bg-yellow-500' : 'bg-red-500'
+                                    }`}
+                                    style={{ width: `${(breakdown.score / breakdown.maxScore) * 100}%` }}
+                                  />
+                                </div>
+                                {breakdown.issues.length > 0 && (
+                                  <div className="text-xs text-gray-600 ml-2">
+                                    {breakdown.issues.map((issue, i) => (
+                                      <div key={i}>• {issue}</div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </CardContent>
+                        </Card>
+
+                        {/* Keyword Density */}
+                        <Card>
+                          <CardHeader className="pb-3">
+                            <CardTitle className="text-sm">Keyword Density</CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-2">
+                            {Object.entries(seoAnalysis.keywordDensity).map(([keyword, density]) => (
+                              <div key={keyword} className="flex justify-between items-center text-sm">
+                                <span className="truncate">{keyword}</span>
+                                <span className={`font-medium px-2 py-1 rounded ${
+                                  density >= 1 && density <= 3 ? 'bg-green-100 text-green-700' :
+                                  density < 1 ? 'bg-red-100 text-red-700' :
+                                  density > 4 ? 'bg-red-100 text-red-700' :
+                                  'bg-yellow-100 text-yellow-700'
+                                }`}>
+                                  {density}%
+                                </span>
+                              </div>
+                            ))}
+                          </CardContent>
+                        </Card>
+
+                        {/* Quick Stats */}
+                        <Card>
+                          <CardHeader className="pb-3">
+                            <CardTitle className="text-sm">Content Stats</CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                              <span>Word Count</span>
+                              <span className="font-medium">{seoAnalysis.wordCount}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Readability</span>
+                              <span className="font-medium">{seoAnalysis.readabilityScore}/100</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>H1 Tags</span>
+                              <span className={`font-medium ${seoAnalysis.h1Count === 1 ? 'text-green-600' : 'text-red-600'}`}>
+                                {seoAnalysis.h1Count}
+                              </span>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </div>
+                    )}
                   </div>
                 )}
               </CardContent>
@@ -542,54 +853,177 @@ export default function CMSDashboard() {
           <TabsContent value="seo" className="space-y-6">
             {currentPage && seoAnalysis && (
               <div className="grid md:grid-cols-2 gap-6">
-                <Card>
+                {/* Overall Score Card */}
+                <Card className={`border-2 ${
+                  seoAnalysis.overallScore >= 67 ? 'border-green-500' :
+                  seoAnalysis.overallScore >= 34 ? 'border-yellow-500' : 'border-red-500'
+                }`}>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                       <TrendingUp className="w-5 h-5" />
-                      SEO Metrics
+                      Overall SEO Score
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div>
-                      <div className="text-sm text-gray-600">Word Count</div>
-                      <div className="text-2xl font-bold">{seoAnalysis.wordCount}</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-600">Readability Score</div>
-                      <div className="text-2xl font-bold">{seoAnalysis.readabilityScore}</div>
-                      <div className="text-xs text-gray-500">
-                        {seoAnalysis.readabilityScore > 60 ? 'Easy to read' : 'Could be simpler'}
+                  <CardContent>
+                    <div className="text-center">
+                      <div className={`text-7xl font-bold ${getScoreColor(seoAnalysis.overallScore)}`}>
+                        {seoAnalysis.overallScore}
+                      </div>
+                      <div className="text-lg text-gray-600 mt-2">out of 100</div>
+                      <div className="mt-6 bg-gray-200 rounded-full h-6 overflow-hidden">
+                        <div
+                          className={`h-full transition-all duration-500 ${
+                            seoAnalysis.overallScore >= 67 ? 'bg-green-500' :
+                            seoAnalysis.overallScore >= 34 ? 'bg-yellow-500' : 'bg-red-500'
+                          }`}
+                          style={{ width: `${seoAnalysis.overallScore}%` }}
+                        />
                       </div>
                     </div>
                   </CardContent>
                 </Card>
 
+                {/* Basic Metrics */}
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                       <FileText className="w-5 h-5" />
-                      Keyword Density
+                      Content Metrics
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      {Object.entries(seoAnalysis.keywordDensity).map(([keyword, density]) => (
-                        <div key={keyword} className="flex justify-between items-center">
-                          <span className="text-sm">{keyword}</span>
-                          <span className={`font-medium ${
-                            density < 1 ? 'text-red-600' :
-                            density > 4 ? 'text-orange-600' :
-                            'text-green-600'
-                          }`}>
-                            {density}%
+                  <CardContent className="space-y-4">
+                    <div>
+                      <div className="text-sm text-gray-600">Word Count</div>
+                      <div className="text-3xl font-bold">{seoAnalysis.wordCount}</div>
+                    </div>
+                    <div>
+                      <div className="text-sm text-gray-600">Readability Score</div>
+                      <div className="text-3xl font-bold">{seoAnalysis.readabilityScore}</div>
+                      <div className="text-xs text-gray-500">
+                        {seoAnalysis.readabilityScore > 60 ? '✓ Easy to read' : '⚠ Could be simpler'}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Score Breakdown */}
+                <Card className="md:col-span-2">
+                  <CardHeader>
+                    <CardTitle>Detailed Score Breakdown</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {seoAnalysis.scoreBreakdown.map((breakdown, idx) => (
+                      <div key={idx} className="space-y-2">
+                        <div className="flex justify-between items-center">
+                          <span className="font-medium">{breakdown.category}</span>
+                          <span className={`text-lg font-bold ${getStatusColor(breakdown.status)}`}>
+                            {breakdown.score}/{breakdown.maxScore}
                           </span>
+                        </div>
+                        <div className="bg-gray-200 rounded-full h-3 overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-300 ${
+                              breakdown.status === 'green' ? 'bg-green-500' :
+                              breakdown.status === 'yellow' ? 'bg-yellow-500' : 'bg-red-500'
+                            }`}
+                            style={{ width: `${(breakdown.score / breakdown.maxScore) * 100}%` }}
+                          />
+                        </div>
+                        {breakdown.issues.length > 0 && (
+                          <div className="ml-4 space-y-1">
+                            {breakdown.issues.map((issue, i) => (
+                              <div key={i} className="text-sm text-gray-600">• {issue}</div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+
+                {/* Keyword Stuffing Alerts */}
+                {seoAnalysis.keywordStuffingAlerts.length > 0 && (
+                  <Card className="md:col-span-2 border-red-500">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 text-red-700">
+                        <AlertTriangle className="w-5 h-5" />
+                        Keyword Stuffing Alerts
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-4">
+                        {seoAnalysis.keywordStuffingAlerts.map((alert, idx) => (
+                          <Alert key={idx} className="border-red-300 bg-red-50">
+                            <AlertDescription>
+                              <div className="space-y-2">
+                                <div className="font-semibold text-red-900">"{alert.keyword}"</div>
+                                <div className="grid grid-cols-2 gap-4 text-sm">
+                                  <div>
+                                    <span className="text-gray-600">Current Density:</span>
+                                    <span className="ml-2 font-bold text-red-700">{alert.density}%</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-600">Google Penalty Risk:</span>
+                                    <span className={`ml-2 font-bold ${
+                                      alert.penaltyRisk === 'High' ? 'text-red-600' :
+                                      alert.penaltyRisk === 'Medium' ? 'text-yellow-600' : 'text-orange-600'
+                                    }`}>{alert.penaltyRisk}</span>
+                                  </div>
+                                </div>
+                                <div className="bg-white p-3 rounded mt-2 text-sm">
+                                  <strong>Recommendation:</strong> Reduce from {alert.currentCount} to approximately {alert.recommendedCount} occurrences
+                                  <div className="mt-1 text-gray-600">
+                                    Before: {alert.density}% → After: ~3% (optimal range: 1-3%)
+                                  </div>
+                                </div>
+                              </div>
+                            </AlertDescription>
+                          </Alert>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Keyword Density */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Keyword Density Analysis</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {Object.entries(seoAnalysis.keywordDensity).map(([keyword, density]) => (
+                        <div key={keyword}>
+                          <div className="flex justify-between items-center mb-1">
+                            <span className="text-sm font-medium">{keyword}</span>
+                            <span className={`font-bold ${
+                              density >= 1 && density <= 3 ? 'text-green-600' :
+                              density < 1 ? 'text-red-600' :
+                              density > 4 ? 'text-red-600' :
+                              'text-yellow-600'
+                            }`}>
+                              {density}%
+                            </span>
+                          </div>
+                          <div className="bg-gray-200 rounded-full h-2 overflow-hidden">
+                            <div
+                              className={`h-full ${
+                                density >= 1 && density <= 3 ? 'bg-green-500' :
+                                density < 1 ? 'bg-red-500' :
+                                density > 4 ? 'bg-red-500' :
+                                'bg-yellow-500'
+                              }`}
+                              style={{ width: `${Math.min(density * 20, 100)}%` }}
+                            />
+                          </div>
                         </div>
                       ))}
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card className="md:col-span-2">
+                {/* Suggestions */}
+                <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                       <AlertCircle className="w-5 h-5" />
@@ -598,11 +1032,15 @@ export default function CMSDashboard() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-2">
-                      {seoAnalysis.suggestions.map((suggestion, index) => (
-                        <Alert key={index}>
-                          <AlertDescription>{suggestion}</AlertDescription>
-                        </Alert>
-                      ))}
+                      {seoAnalysis.suggestions.length > 0 ? (
+                        seoAnalysis.suggestions.map((suggestion, index) => (
+                          <Alert key={index}>
+                            <AlertDescription>{suggestion}</AlertDescription>
+                          </Alert>
+                        ))
+                      ) : (
+                        <div className="text-green-600 font-medium">✓ All SEO best practices are being followed!</div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -628,12 +1066,15 @@ export default function CMSDashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <Button disabled={pages.length === 0}>
+            <Button
+              onClick={downloadAllPages}
+              disabled={pages.length === 0 || loading}
+            >
               <Download className="w-4 h-4 mr-2" />
-              Download All {pages.length} Updated Files
+              Download All {pages.length} Updated Files as ZIP
             </Button>
             <p className="text-sm text-gray-600 mt-4">
-              Download all edited files as a ZIP ready to deploy to Railway
+              Download all edited files as individual .tsx files in a ZIP archive, ready to deploy to Railway
             </p>
           </CardContent>
         </Card>
