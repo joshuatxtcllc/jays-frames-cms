@@ -3,10 +3,12 @@ import cors from 'cors';
 import { Pool } from 'pg';
 import multer from 'multer';
 import fs from 'fs';
+import JSZip from 'jszip';
 import {
   extractPageContent,
   analyzePageSEO,
   generateUpdatedFile,
+  generateTSXFile,
 } from './content-extractor';
 
 const app = express();
@@ -330,6 +332,86 @@ app.post('/api/seo/analyze', async (req, res) => {
     });
   } catch (error: any) {
     console.error('Error analyzing SEO:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================================================
+// DOWNLOAD / EXPORT ROUTES
+// ============================================================================
+
+app.post('/api/pages/export/zip', async (req, res) => {
+  try {
+    const { pageIds } = req.body;
+
+    // Fetch all pages or specific pages
+    let query = 'SELECT * FROM pages';
+    let params: any[] = [];
+
+    if (pageIds && pageIds.length > 0) {
+      query += ' WHERE id = ANY($1)';
+      params = [pageIds];
+    }
+
+    const result = await pool.query(query, params);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No pages found' });
+    }
+
+    // Create ZIP file
+    const zip = new JSZip();
+    const pagesFolder = zip.folder('pages');
+
+    for (const page of result.rows) {
+      const tsxContent = generateTSXFile(
+        page.page_slug,
+        page.page_type,
+        page.seo_meta,
+        page.content
+      );
+
+      pagesFolder?.file(`${page.page_slug}.tsx`, tsxContent);
+    }
+
+    // Generate ZIP buffer
+    const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+    // Send ZIP file
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename=pages-export.zip');
+    res.send(zipBuffer);
+  } catch (error: any) {
+    console.error('Error exporting pages:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Live SEO analysis for real-time feedback
+app.post('/api/seo/analyze/live', async (req, res) => {
+  try {
+    const { content, seoMeta } = req.body;
+
+    const keywordsResult = await pool.query(
+      'SELECT keyword FROM seo_keywords ORDER BY priority DESC'
+    );
+    const targetKeywords = keywordsResult.rows.map(row => row.keyword);
+
+    const extractedContent = {
+      pageSlug: 'temp',
+      pageType: 'general',
+      seoMeta: seoMeta || { title: '', description: '', keywords: '', canonicalUrl: '' },
+      sections: content || {},
+    };
+
+    const analysis = analyzePageSEO(extractedContent, targetKeywords);
+
+    res.json({
+      success: true,
+      analysis,
+    });
+  } catch (error: any) {
+    console.error('Error in live SEO analysis:', error);
     res.status(500).json({ error: error.message });
   }
 });
