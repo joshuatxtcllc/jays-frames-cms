@@ -2,8 +2,6 @@
 
 # This file configures how Railway deploys your application
 
-$schema: https://railway.app/railway.schema.json
-
 services:
   # Backend API Server
   - name: cms-api
