@@ -1,0 +1,57 @@
+========================================
+HOW TO CREATE YOUR PULL REQUEST
+========================================
+
+STEP 1: Open GitHub PR Page
+----------------------------
+Click this URL (or copy-paste into browser):
+
+https://github.com/joshuatxtcllc/jays-frames-cms/pull/new/claude/cms-seo-download-features-01Rs72FoViR9Yh4FnqqYGdyj
+
+
+STEP 2: Fill in the Title
+--------------------------
+Copy this exact text:
+
+Add Advanced SEO Analysis System and Download Features
+
+
+STEP 3: Fill in the Description
+--------------------------------
+See PR-DETAILS.md in this folder - copy everything under the "Description" heading
+
+
+STEP 4: Click "Create Pull Request"
+------------------------------------
+That's it! Your PR will be created with all 3 commits:
+- Initial CMS with server and client
+- Add complete SEO analysis system and download features  
+- Remove railway.toml and add deployment guide
+
+
+========================================
+WHAT'S INCLUDED IN THIS PR
+========================================
+
+✅ 4 Major Features:
+   1. Working Download Feature (export pages as .tsx files in ZIP)
+   2. Visual SEO Scoring System (0-100 with color indicators)
+   3. Keyword Stuffing Alert System (real-time warnings)
+   4. Live Editing with Instant Feedback (debounced analysis)
+
+✅ Fixed Railway Deployment:
+   - Removed problematic railway.toml
+   - Added comprehensive deployment guide
+   - railway.json already correctly configured
+
+✅ All Tests Passing:
+   - Server builds: ✓
+   - Client builds: ✓
+   - Dependencies installed: ✓
+
+📊 Stats:
+   - 9 files changed
+   - 1,357 insertions(+)
+   - 178 deletions(-)
+
+========================================
