@@ -1,9 +1,9 @@
 # Nixpacks configuration for Client UI
 [phases.setup]
-nixPkgs = ["nodejs_20", "npm-9_x"]
+nixPkgs = ["nodejs_20"]
 
 [phases.install]
-cmds = ["npm install"]
+cmds = ["npm ci --production=false"]
 
 [phases.build]
 cmds = ["npm run build"]
